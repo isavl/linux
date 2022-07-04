@@ -1,0 +1,347 @@
+#!/usr/bin/make -f
+
+include /usr/share/dpkg/default.mk
+
+include debian/rules.d/env.mk
+include debian/rules.d/${DEB_HOST_ARCH_CPU}.mk
+
+export LC_ALL = C.UTF-8
+
+undefine LANGUAGE
+
+# This variable sets the build path to use in features such as fixdebugpath so
+# that they can be controlled by the caller. This variable is currently Debian
+# and derivatives-specific.
+export DEB_BUILD_PATH = $(CURDIR)
+
+# All debhelper tools will parse command line arguments listed in this variable
+# before any command option (as if they had been prepended to the command line
+# arguments). Unfortunately, some third-party provided tools may not support
+# this variable and will ignore these command line arguments.
+#
+# When using dh(1), it can be passed options that will be passed on to each
+# debhelper command, which is generally better than using DH_OPTIONS.
+export DH_OPTIONS
+
+ifeq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+PARALLEL :=
+else
+PARALLEL := -j$(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+endif
+
+DEB_MAINTAINER := $(shell sed -ne 's,^Maintainer: .[^<]*<\([^>]*\)>,\1,p' debian/control)
+DEB_SOURCE_DATE := $(shell dpkg-parsechangelog -SDate)
+DEB_SOURCE_DATE_UTC_ISO := $(shell date -u -d '$(DEB_SOURCE_DATE)' +%Y-%m-%d)
+
+KERNEL_MAKE_ENV := env
+
+# Additional options to the C compiler (for built-in and modules).
+KERNEL_MAKE_ENV += KCFLAGS="-fdebug-prefix-map=$(CURDIR)=."
+
+# Additional flags to be passed to $(HOSTCC) when building host programs.
+KERNEL_MAKE_ENV += HOSTCFLAGS="$(CFLAGS)"
+
+# Additional flags to be passed to $(HOSTCXX) when building host programs.
+KERNEL_MAKE_ENV += HOSTCXXFLAGS="$(CPPFLAGS)"
+
+# Additional flags to be passed when linking host programs.
+KERNEL_MAKE_ENV += HOSTLDFLAGS="$(LDFLAGS)"
+
+# Set the kbuild verbosity.
+KERNEL_MAKE_ENV += KBUILD_VERBOSE="1"
+
+# These two variables allow to override the user@host string displayed during
+# boot and in /proc/version. The default value is the output of the commands
+# whoami and host, respectively.
+KERNEL_MAKE_ENV += KBUILD_BUILD_USER="$(word 1,$(subst @, ,$(DEB_MAINTAINER)))"
+KERNEL_MAKE_ENV += KBUILD_BUILD_HOST="$(word 2,$(subst @, ,$(DEB_MAINTAINER)))"
+
+# Setting this to a date string overrides the timestamp used in the UTS_VERSION
+# definition (uname -v in the running kernel). The value has to be a string that
+# can be passed to date -d. The default value is the output of the date command
+# at one point during build.
+KERNEL_MAKE_ENV += KBUILD_BUILD_TIMESTAMP="$(DEB_SOURCE_DATE_UTC_ISO)"
+
+KERNEL_MAKE = $(KERNEL_MAKE_ENV) $(MAKE) $(PARALLEL)
+
+.NOTPARALLEL:
+
+configure:
+	dh_testdir
+
+# Generate debian control files.
+	$(foreach file, $(wildcard debian/*.in), \
+		sed -e 's/@KERNEL_VERSION@/$(DEB_VERSION)/g' -e 's/@KERNEL_IMAGE_PKGNAME@/$(KERNEL_IMAGE_PKGNAME)/g' < $(file) > $(basename $(file)); \
+		chmod +x $(basename $(file));)
+
+# Copy default linux config file.
+	cp debian/extras/defconfig/default/$(DEB_HOST_ARCH_CPU) .config
+
+# Debug info conflicts.
+#
+# This is not a problem of unreproducibility, but of generated files being
+# 'too' reproducible.
+#
+# Once you set all the necessary variables for a reproducible build, a vDSO’s
+# debug information may be identical even for different kernel versions.
+# This can result in file conflicts between debug information packages for
+# the different kernel versions.
+#
+# To avoid this, you can make the vDSO different for different kernel versions
+# by including an arbitrary string of “salt” in it. This is specified by the
+# Kconfig symbol CONFIG_BUILD_SALT.
+	sed -i -e "s/^CONFIG_BUILD_SALT.*/CONFIG_BUILD_SALT=\"$(DEB_VERSION).$(DEB_HOST_ARCH_CPU)\"/" .config
+
+# Replace kernel version by debian package changelog (${version}-${release}).
+	sed -i \
+		-e "s/^KERNELRELEASE.*/KERNELRELEASE = $(DEB_VERSION)/" \
+		-e "s/^KERNELVERSION.*/KERNELVERSION = $(DEB_VERSION)/" \
+		Makefile
+
+# Setup kernel config.
+	$(KERNEL_MAKE) ARCH="$(KERNEL_ARCH)" olddefconfig
+
+build: build-indep build-arch
+
+build-arch: configure
+	dh_testdir
+
+# Build kernel image.
+	$(KERNEL_MAKE) ARCH="$(KERNEL_ARCH)" $(KERNEL_MAKE_TARGET)
+
+# Build kernel modules.
+	$(KERNEL_MAKE) ARCH="$(KERNEL_ARCH)" modules
+
+# Build kernel device tree blobs (dtb).
+ifneq ($(filter arm64 armel armhf mipsr6 mipsr6el mips64r6 mips64r6el riscv64,$(KERNEL_ARCH)),)
+	$(KERNEL_MAKE) ARCH="$(KERNEL_ARCH)" dtbs
+endif
+
+build-indep:
+	dh_testdir
+
+binary: binary-indep binary-arch
+
+binary-linux: DEB_PACKAGE_NAME := linux
+binary-linux: DEB_PACKAGE_DIR := $(CURDIR)/debian/$(DEB_PACKAGE_NAME)
+binary-linux: DH_OPTIONS := --package=$(DEB_PACKAGE_NAME)
+binary-linux:
+	dh_testdir
+	dh_testroot
+	dh_prep
+	dh_installdirs "boot"
+
+# Install kernel image.
+ifeq ($(KERNEL_IMAGE_FILE),vmlinux)
+# This is the unprocessed ELF image, so we need to strip debug symbols.
+	objcopy --strip-debug "$(CURDIR)/vmlinux" "$(DEB_PACKAGE_DIR)/boot/$(KERNEL_IMAGE_PKGNAME)-$(DEB_VERSION)"
+else
+	install -m 644 "$(CURDIR)/${KERNEL_IMAGE_FILE}" "$(DEB_PACKAGE_DIR)/boot/$(KERNEL_IMAGE_PKGNAME)-$(DEB_VERSION)"
+endif
+
+# Install kernel modules.
+	$(KERNEL_MAKE) \
+		ARCH="$(KERNEL_ARCH)" \
+		INSTALL_MOD_PATH="$(DEB_PACKAGE_DIR)" \
+		INSTALL_MOD_STRIP=1 \
+		DEPMOD="$(CURDIR)/debian/scripts/no-depmod.sh" \
+		modules_install
+
+# Install kernel device tree blobs (dtb).
+ifneq ($(filter arm64 armel armhf mipsr6 mipsr6el mips64r6 mips64r6el riscv64,$(KERNEL_ARCH)),)
+	$(KERNEL_MAKE) \
+		ARCH="$(KERNEL_ARCH)" \
+		INSTALL_DTBS_PATH="$(DEB_PACKAGE_DIR)/lib/modules/$(DEB_VERSION)/dtb" \
+		dtbs_install
+# Remove executable flag from dtb files.
+	find "$(DEB_PACKAGE_DIR)/lib/modules/$(DEB_VERSION)/dtb" -type f -name "*.dtb" -exec chmod -x {} +
+endif
+
+	sed "/CONFIG_\(MODULE_SIG_\(ALL\|KEY\)\|SYSTEM_TRUSTED_KEYS\|BUILD_SALT\)[ =]/d" $(CURDIR)/.config \
+		> "$(DEB_PACKAGE_DIR)/boot/config-$(DEB_VERSION)"
+
+	echo "ffffffffffffffff B The real System.map is in the linux-dbg package" \
+		> "$(DEB_PACKAGE_DIR)/boot/System.map-$(DEB_VERSION)"
+
+	rm -f "$(DEB_PACKAGE_DIR)/lib/modules/$(DEB_VERSION)/build"
+	rm -f "$(DEB_PACKAGE_DIR)/lib/modules/$(DEB_VERSION)/source"
+
+	dh_strip --no-automatic-dbgsym -Xvmlinux -Xvmlinuz
+
+	dh_installchangelogs
+	dh_lintian
+	dh_compress
+	dh_fixperms
+	dh_makeshlibs
+	dh_shlibdeps
+	dh_installdeb
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+binary-linux-dev: DEB_PACKAGE_NAME := linux-dev
+binary-linux-dev: DEB_PACKAGE_DIR := $(CURDIR)/debian/$(DEB_PACKAGE_NAME)
+binary-linux-dev: DH_OPTIONS := --package=$(DEB_PACKAGE_NAME)
+binary-linux-dev:
+	dh_testdir
+	dh_testroot
+	dh_prep
+
+# Install kernel headers.
+	$(KERNEL_MAKE) \
+		ARCH="$(KERNEL_HDR_ARCH)" \
+		INSTALL_HDR_PATH="$(DEB_PACKAGE_DIR)/usr" \
+		headers_install
+
+	rm -rf "$(DEB_PACKAGE_DIR)/usr/include/drm" "$(DEB_PACKAGE_DIR)/usr/include/scsi"
+
+	find "$(DEB_PACKAGE_DIR)/usr/include" \
+		\( -name ".install" -o -name ".check" -o -name "..install.cmd" -o -name "..check.cmd" \) \
+		-delete
+
+# Move include/asm to arch-specific directory.
+	mkdir -p "$(DEB_PACKAGE_DIR)/usr/include/$(DEB_HOST_MULTIARCH)"
+	mv "$(DEB_PACKAGE_DIR)/usr/include/asm" "$(DEB_PACKAGE_DIR)/usr/include/$(DEB_HOST_MULTIARCH)/"
+	test ! -d "$(DEB_PACKAGE_DIR)/usr/include/arch" || \
+		mv "$(DEB_PACKAGE_DIR)/usr/include/arch" "$(DEB_PACKAGE_DIR)/usr/include/$(DEB_HOST_MULTIARCH)/"
+
+	dh_installchangelogs
+	dh_lintian
+	dh_compress
+	dh_fixperms
+	dh_installdeb
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+binary-linux-headers: DEB_PACKAGE_NAME := linux-headers
+binary-linux-headers: DEB_PACKAGE_DIR := $(CURDIR)/debian/$(DEB_PACKAGE_NAME)
+binary-linux-headers: DEB_PACKAGE_INSTALL_DIR := $(DEB_PACKAGE_DIR)/usr/src/$(DEB_PACKAGE_NAME)-$(DEB_VERSION)
+binary-linux-headers: DH_OPTIONS := --package=$(DEB_PACKAGE_NAME)
+binary-linux-headers:
+	dh_testdir
+	dh_testroot
+	dh_prep
+
+# Save the headers/makefiles etc for building modules against.
+#
+# This all looks scary, but the end result is supposed to be:
+#
+#   - all arch relevant include/ files
+#   - all Makefile/Kconfig files
+#   - all script/ files
+
+	mkdir -p "$(DEB_PACKAGE_INSTALL_DIR)"
+
+# Copy everything.
+	cp -a --parents $$(find -type f \( -name "Makefile*" -o -name "Kconfig*" \)) "$(DEB_PACKAGE_INSTALL_DIR)"
+	cp -a .config Module.symvers System.map "$(DEB_PACKAGE_INSTALL_DIR)"
+	if [ -s "Module.markers" ]; then \
+		cp -a Module.markers "$(DEB_PACKAGE_INSTALL_DIR)"; \
+	fi
+
+# Drop all but the needed Makefiles/Kconfig files.
+	rm -rf "$(DEB_PACKAGE_INSTALL_DIR)/Documentation"
+	rm -rf "$(DEB_PACKAGE_INSTALL_DIR)/include"
+	rm -rf "$(DEB_PACKAGE_INSTALL_DIR)/scripts"
+
+	cp -a scripts "$(DEB_PACKAGE_INSTALL_DIR)"
+
+# These are a few files associated with objtool.
+	if [ -f "tools/objtool/objtool" ]; then \
+		cp -a tools/objtool/objtool "$(DEB_PACKAGE_INSTALL_DIR)/tools/objtool/" || : ; \
+		cp -a --parents tools/build/Build "$(DEB_PACKAGE_INSTALL_DIR)/"; \
+		cp -a --parents tools/build/Build.include "$(DEB_PACKAGE_INSTALL_DIR)/"; \
+		cp -a --parents tools/build/fixdep.c "$(DEB_PACKAGE_INSTALL_DIR)/"; \
+		cp -a --parents tools/scripts/utilities.mak "$(DEB_PACKAGE_INSTALL_DIR)/"; \
+		cp -a --parents tools/lib/str_error_r.c "$(DEB_PACKAGE_INSTALL_DIR)/"; \
+		cp -a --parents tools/lib/string.c "$(DEB_PACKAGE_INSTALL_DIR)/"; \
+		cp -a --parents tools/lib/subcmd/* "$(DEB_PACKAGE_INSTALL_DIR)/"; \
+		cp -a --parents tools/objtool/* "$(DEB_PACKAGE_INSTALL_DIR)/"; \
+	fi
+
+	if [ -d "arch/$(KERNEL_ARCH)/scripts" ]; then \
+		cp -a "arch/$(KERNEL_ARCH)/scripts" "$(DEB_PACKAGE_INSTALL_DIR)/arch/$(KERNEL_ARCH)" || : ; \
+	fi
+
+	if [ -f "arch/$(KERNEL_ARCH)"/*lds ]; then \
+		cp -a "arch/$(KERNEL_ARCH)"/*lds "$(DEB_PACKAGE_INSTALL_DIR)/arch/$(KERNEL_ARCH)/" || : ; \
+	fi
+
+	if [ -f "arch/$(KERNEL_ASM_ARCH)/kernel/module.lds" ]; then \
+		cp -a --parents "arch/$(KERNEL_ASM_ARCH)/kernel/module.lds" "$(DEB_PACKAGE_INSTALL_DIR)/"; \
+	fi
+
+	if [ -d "arch/$(KERNEL_ASM_ARCH)/include" ]; then \
+		cp -a --parents "arch/$(KERNEL_ASM_ARCH)/include" "$(DEB_PACKAGE_INSTALL_DIR)/"; \
+	fi
+
+	cp -a include "$(DEB_PACKAGE_INSTALL_DIR)/include"
+
+	rm -f "$(DEB_PACKAGE_INSTALL_DIR)/scripts"/*.o
+	rm -f "$(DEB_PACKAGE_INSTALL_DIR)/scripts"/*/*.o
+
+ifeq ($(KERNEL_ARCH),arm64)
+# arch/arm64/include/asm/xen references arch/arm
+	cp -a --parents arch/arm/include/asm/xen "$(DEB_PACKAGE_INSTALL_DIR)/"
+# arch/arm64/include/asm/opcodes.h references arch/arm
+	cp -a --parents arch/arm/include/asm/opcodes.h "$(DEB_PACKAGE_INSTALL_DIR)/"
+endif
+
+	if [ -f "arch/$(KERNEL_ARCH)/lib/crtsavres.o" ]; then \
+		cp -a --parents "arch/$(KERNEL_ARCH)/lib/crtsavres".[So] "$(DEB_PACKAGE_INSTALL_DIR)/"; \
+	fi
+
+ifneq ($(filter i386 i686 x86_64,$(KERNEL_ARCH)),)
+# Files for "make prepare".
+	cp -a --parents arch/x86/entry/syscalls/syscall_32.tbl "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents arch/x86/entry/syscalls/syscall_64.tbl "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents arch/x86/tools/relocs.c "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents arch/x86/tools/relocs.h "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents arch/x86/tools/relocs_32.c "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents arch/x86/tools/relocs_64.c "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents arch/x86/tools/relocs_common.c "$(DEB_PACKAGE_INSTALL_DIR)/"
+
+# Yes this is more includes than we probably need. Feel free to sort out
+# dependencies if you so choose.
+	cp -a --parents arch/x86/boot/ctype.h "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents arch/x86/boot/string.c "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents arch/x86/boot/string.h "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents arch/x86/purgatory/entry64.S "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents arch/x86/purgatory/purgatory.c "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents arch/x86/purgatory/setup-x86_64.S "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents arch/x86/purgatory/stack.S "$(DEB_PACKAGE_INSTALL_DIR)/"
+	cp -a --parents tools/include/* "$(DEB_PACKAGE_INSTALL_DIR)/"
+endif
+
+# Make sure the Makefile and version.h have a matching timestamp so that
+# external modules can be built.
+	touch -r \
+		"$(DEB_PACKAGE_INSTALL_DIR)/Makefile" \
+		"$(DEB_PACKAGE_INSTALL_DIR)/include/generated/uapi/linux/version.h"
+
+# Copy .config to include/config/auto.conf so "make prepare" is unnecessary.
+	cp -a "$(DEB_PACKAGE_INSTALL_DIR)/.config" "$(DEB_PACKAGE_INSTALL_DIR)/include/config/auto.conf"
+
+# Remove junk.
+	find "$(DEB_PACKAGE_INSTALL_DIR)" -type f -name ".gitignore" -delete
+
+	dh_link "usr/src/$(DEB_PACKAGE_NAME)-$(DEB_VERSION)" "lib/modules/$(DEB_VERSION)/build"
+	dh_link "usr/src/$(DEB_PACKAGE_NAME)-$(DEB_VERSION)" "lib/modules/$(DEB_VERSION)/source"
+
+	dh_installchangelogs
+	dh_lintian
+	dh_compress
+	dh_fixperms
+	dh_installdeb
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+binary-arch: build-arch binary-linux binary-linux-dev binary-linux-headers
+	dh_testdir
+
+binary-indep: build-indep
+	dh_testdir
+
+.PHONY: binary binary-% build build-% configure clean
