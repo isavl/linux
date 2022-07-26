@@ -1,3 +1,9 @@
+linux (5.14.21-1.rpi) bullseye-rpi; urgency=medium
+
+  * Rebuild 5.14.21 for bullseye-rpi
+
+ -- Igor Savlook <isav@alzari.pw>  Tue, 26 Jul 2022 03:23:08 +0300
+
 linux (5.14.21-1) unstable; urgency=medium
 
   * Upstream release 5.14.21
