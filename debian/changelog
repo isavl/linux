@@ -1,3 +1,10 @@
+linux (5.19.8-1) unstable; urgency=medium
+
+  * Upstream release 5.19.8
+  * Don't overwrite auto.conf with .config
+
+ -- Igor Savlook <isav@alzari.pw>  Fri, 09 Sep 2022 13:49:02 +0300
+
 linux (5.19.0-1) unstable; urgency=medium
 
   * Upstream release 5.19.0

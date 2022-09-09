@@ -318,10 +318,8 @@ endif
 # external modules can be built.
 	touch -r \
 		"$(DEB_PACKAGE_INSTALL_DIR)/Makefile" \
+		"$(DEB_PACKAGE_INSTALL_DIR)/include/config/auto.conf" \
 		"$(DEB_PACKAGE_INSTALL_DIR)/include/generated/uapi/linux/version.h"
-
-# Copy .config to include/config/auto.conf so "make prepare" is unnecessary.
-	cp -a "$(DEB_PACKAGE_INSTALL_DIR)/.config" "$(DEB_PACKAGE_INSTALL_DIR)/include/config/auto.conf"
 
 # Remove junk.
 	find "$(DEB_PACKAGE_INSTALL_DIR)" -type f -name ".gitignore" -delete
