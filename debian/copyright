@@ -1,5 +1,5 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: linux
+Upstream-Name: Linux kernel
 Upstream-Contact: linux@kernel.org
 Source: https://www.kernel.org/pub/linux/kernel/
 
