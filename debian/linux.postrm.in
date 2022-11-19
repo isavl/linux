@@ -1,0 +1,33 @@
+#!/bin/sh
+
+set -e
+
+KERNEL_VERSION="@KERNEL_VERSION@"
+
+KERNEL_IMAGE_PATH="/boot/@KERNEL_IMAGE_PKGNAME@-${KERNEL_VERSION}"
+
+if [ -d "/etc/kernel/postrm.d" ]; then
+    DEB_MAINT_PARAMS="${*}" run-parts \
+        --report \
+        --exit-on-error \
+        --arg="${KERNEL_VERSION}" \
+        --arg="${KERNEL_IMAGE_PATH}" \
+        "/etc/kernel/postrm.d"
+fi
+
+if [ "${1}" = "purge" ]; then
+    for file in modules.dep modules.isapnpmap modules.pcimap \
+        modules.usbmap modules.parportmap \
+        modules.generic_string modules.ieee1394map \
+        modules.ieee1394map modules.pnpbiosmap \
+        modules.alias modules.ccwmap modules.inputmap \
+        modules.symbols modules.ofmap \
+        modules.seriomap modules.\*.bin \
+        modules.softdep modules.devname; do
+        eval rm -f "/lib/modules/${KERNEL_VERSION}/${file}"
+    done
+
+    rmdir "/lib/modules/${KERNEL_VERSION}" || true
+fi
+
+exit 0

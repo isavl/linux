@@ -1,0 +1,8 @@
+KERNEL_ARCH := arm64
+KERNEL_ASM_ARCH := arm64
+KERNEL_HDR_ARCH := arm64
+
+KERNEL_MAKE_TARGET := Image
+
+KERNEL_IMAGE_FILE := arch/arm64/boot/Image
+KERNEL_IMAGE_PKGNAME := vmlinux

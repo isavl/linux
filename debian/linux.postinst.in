@@ -1,0 +1,26 @@
+#!/bin/sh
+
+set -e
+
+KERNEL_VERSION="@KERNEL_VERSION@"
+
+KERNEL_IMAGE_PATH="/boot/@KERNEL_IMAGE_PKGNAME@-${KERNEL_VERSION}"
+
+umask 022
+
+if [ "${1}" != "configure" ]; then
+    exit 0
+fi
+
+depmod "${KERNEL_VERSION}"
+
+if [ -d "/etc/kernel/postinst.d" ]; then
+    DEB_MAINT_PARAMS="${*}" run-parts \
+        --report \
+        --exit-on-error \
+        --arg="${KERNEL_VERSION}" \
+        --arg="${KERNEL_IMAGE_PATH}" \
+        "/etc/kernel/postinst.d"
+fi
+
+exit 0
