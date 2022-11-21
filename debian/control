@@ -34,7 +34,7 @@ Build-Depends:
     xz-utils,
     zlib1g-dev,
     zstd,
-Standards-Version: 4.5.1
+Standards-Version: 4.6.1
 Rules-Requires-Root: no
 
 Package: linux

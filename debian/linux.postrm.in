@@ -15,7 +15,11 @@ if [ -d "/etc/kernel/postrm.d" ]; then
         "/etc/kernel/postrm.d"
 fi
 
-if [ "${1}" = "purge" ]; then
+if [ "${1}" = "purge" ] || [ "${1}" = "upgrade" ]; then
+    if [ -f "/boot/initrd.img-${KERNEL_VERSION}" ]; then
+        rm -f "/boot/initrd.img-${KERNEL_VERSION}" || true
+    fi
+
     for file in modules.dep modules.isapnpmap modules.pcimap \
         modules.usbmap modules.parportmap \
         modules.generic_string modules.ieee1394map \
