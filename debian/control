@@ -26,10 +26,11 @@ Build-Depends:
     libtool,
     lz4,
     m4,
-    make (>= 3.81~),
+    make (>= 3.82~),
     openssl,
     python3:any,
     rsync,
+    rust-all (>= 1.62~),
     tar (>= 1.23~),
     xz-utils,
     zlib1g-dev,
@@ -46,7 +47,7 @@ Depends:
     dracut | linux-initramfs-tool,
     kmod,
     linux-base (>= 4.3~),
-    linux-firmware (>= 20220509~),
+    linux-firmware (>= 20230210~),
 Description: The Linux kernel and modules
  This package contains the Linux kernel (vmlinuz), the core of any
  Linux operating system. The kernel handles the basic functions
