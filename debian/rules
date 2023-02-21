@@ -1,5 +1,9 @@
 #!/usr/bin/make -f
 
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+DPKG_EXPORT_BUILDFLAGS = 1
+
 include /usr/share/dpkg/default.mk
 
 include debian/rules.d/env.mk
@@ -168,6 +172,7 @@ endif
 
 	dh_strip --no-automatic-dbgsym -Xvmlinux -Xvmlinuz
 
+	dh_installdocs
 	dh_installchangelogs
 	dh_lintian
 	dh_compress
@@ -205,6 +210,7 @@ binary-linux-dev:
 	test ! -d "$(DEB_PACKAGE_DIR)/usr/include/arch" || \
 		mv "$(DEB_PACKAGE_DIR)/usr/include/arch" "$(DEB_PACKAGE_DIR)/usr/include/$(DEB_HOST_MULTIARCH)/"
 
+	dh_installdocs
 	dh_installchangelogs
 	dh_lintian
 	dh_compress
@@ -327,6 +333,9 @@ endif
 	dh_link "usr/src/$(DEB_PACKAGE_NAME)-$(DEB_VERSION)" "lib/modules/$(DEB_VERSION)/build"
 	dh_link "usr/src/$(DEB_PACKAGE_NAME)-$(DEB_VERSION)" "lib/modules/$(DEB_VERSION)/source"
 
+	dh_strip --no-automatic-dbgsym
+
+	dh_installdocs
 	dh_installchangelogs
 	dh_lintian
 	dh_compress

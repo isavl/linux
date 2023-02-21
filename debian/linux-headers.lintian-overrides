@@ -3,5 +3,5 @@ linux-headers: executable-not-elf-or-script usr/src/linux-headers-*/scripts/*
 linux-headers: undeclared-elf-prerequisites usr/src/linux-headers-*/scripts/*
 linux-headers: undeclared-elf-prerequisites usr/src/linux-headers-*/tools/*
 
-linux-headers: unstripped-binary-or-object usr/src/linux-headers-*/scripts/*
-linux-headers: unstripped-binary-or-object usr/src/linux-headers-*/tools/*
+# linux-headers: unstripped-binary-or-object usr/src/linux-headers-*/scripts/*
+# linux-headers: unstripped-binary-or-object usr/src/linux-headers-*/tools/*
